@@ -25,3 +25,6 @@ endif
 
 console: compile
 	@erl -pa ebin deps/*/ebin
+
+stress: compile
+	@erl -pa ebin deps/*/ebin -run appmeter_stress
