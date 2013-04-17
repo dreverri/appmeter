@@ -3,9 +3,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0,
-         random_event_mgr/0
-        ]).
+-export([start_link/0]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -17,32 +15,14 @@
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-random_event_mgr() ->
-    Children = supervisor:which_children(?MODULE),
-    EventMgrs = [Pid || {_, Pid, _, dynamic} <- Children],
-    random:seed(now()),
-    N = random:uniform(length(EventMgrs)),
-    lists:nth(N, EventMgrs).
-
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
 
 init([]) ->
-    C = event_mgr_count(),
-    EventMgrs = [event_mgr_spec(I) || I <- lists:seq(1, C)],
-    ProxySup = {appmeter_proxy_sup, {appmeter_proxy_sup, start_link, []},
-                permanent, 5000, supervisor, [appmeter_proxy_sup]},
-    Children = [ProxySup|EventMgrs],
-    {ok, {{one_for_one, 5, 10}, Children}}.
+    EventMgrSup = supervisor_spec(appmeter_event_mgr_sup),
+    ProxySup = supervisor_spec(appmeter_proxy_sup),
+    {ok, {{one_for_one, 5, 10}, [EventMgrSup, ProxySup]}}.
 
-event_mgr_count() ->
-    case application:get_env(appmeter, event_mgr_count) of
-        {ok, C} when is_integer(C) ->
-            C;
-        _ ->
-            8
-    end.
-
-event_mgr_spec(I) ->
-    {I, {appmeter_event_mgr, start_link, []}, permanent, 5000, worker, dynamic}.
+supervisor_spec(M) ->
+    {M, {M, start_link, []}, permanent, 5000, supervisor, [M]}.
