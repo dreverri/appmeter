@@ -8,5 +8,10 @@
                   stdlib
                  ]},
   {mod, { appmeter_app, []}},
-  {env, []}
+  {env, [
+    {event_mgr_count, 8},
+    {handlers, []},
+    {flush_interval, 1000},
+    {max_sample_size, 100}
+  ]}
  ]}.

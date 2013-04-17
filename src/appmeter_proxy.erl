@@ -5,9 +5,9 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([start_link/2,
-         set_sample_rate/3,
-         notify/2
+-export([start_link/0,
+         notify/2,
+         reload/1
         ]).
 
 %% ------------------------------------------------------------------
@@ -22,57 +22,73 @@
          code_change/3
         ]).
 
--record(state, {sample_size, population_size, event_mgr, count=0}).
+-record(state, {event_mgr,
+                flush_interval,
+                max_sample_size,
+                timer,
+                sample_size=0,
+                population_size=0,
+                acc=[]
+               }).
 
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
 
-start_link(SampleSize, PopulationSize) ->
-    gen_server:start_link(?MODULE, {SampleSize, PopulationSize}, []).
+start_link() ->
+    gen_server:start_link(?MODULE, [], []).
 
-set_sample_rate(Pid, SampleSize, PopulationSize) ->
-    gen_server:cast(Pid, {sample_rate, SampleSize, PopulationSize}).
+notify(Pid, Event) ->
+    gen_server:cast(Pid, {notify, Event}).
 
-notify(Pid, Events) ->
-    gen_server:cast(Pid, {notify, Events}).
+reload(Pid) ->
+    gen_server:cast(Pid, reload).
 
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init({SampleSize, PopulationSize}) ->
-    self() ! init,
-    {ok, #state{sample_size=SampleSize,
-                population_size=PopulationSize}}.
+init(_) ->
+    EventMgr = event_mgr(),
+    State = load_env(#state{event_mgr=EventMgr}),
+    case manage_timer(State) of
+        {ok, State1} ->
+            {ok, State1};
+        {error, Reason} ->
+            {stop, {timer_error, Reason}}
+    end.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-handle_cast({sample_rate, SampleSize, PopulationSize}, State) ->
-    %% TODO: should the count be reset? should current sample be completed
-    %% before changing the sampling rate?
-    {noreply, State#state{sample_size=SampleSize,
-                          population_size=PopulationSize}};
+handle_cast(reload, State) ->
+    State1 = load_env(State),
+    case manage_timer(State1) of
+        {ok, State2} ->
+            {noreply, State2};
+        {error, Reason} ->
+            {stop, {timer_error, Reason}, State1}
+    end;
 
-handle_cast({notify, Events}, State) ->
-    maybe_notify(State, Events),
-    Count = State#state.count,
-    case Count > State#state.population_size of
+handle_cast({notify, Event}, State) ->
+    PopulationSize = State#state.population_size + 1,
+    case State#state.sample_size >= State#state.max_sample_size of
         true ->
-            {noreply, State#state{count=0}};
+            {noreply, State#state{population_size=PopulationSize}};
         false ->
-            {noreply, State#state{count=Count+1}}
+            Acc = [Event|State#state.acc],
+            SampleSize = State#state.sample_size + 1,
+            {noreply, State#state{acc=Acc,
+                                  sample_size=SampleSize,
+                                  population_size=PopulationSize}}
     end.
 
-handle_info(init, State) ->
-    EventMgr = appmeter:event_mgr(),
-    monitor(process, EventMgr),
-    {noreply, State#state{event_mgr=EventMgr}};
+handle_info(flush, State) ->
+    State1 = flush(State),
+    {noreply, State1};
 
 handle_info({'DOWN', _, _, Pid, _}, State=#state{event_mgr=Pid}) ->
-    NewEventMgr = appmeter:event_mgr(),
-    monitor(process, NewEventMgr),
+    NewEventMgr = event_mgr(),
     {noreply, State#state{event_mgr=NewEventMgr}}.
 
 terminate(_Reason, _State) ->
@@ -85,14 +101,51 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-maybe_notify(State, Events) ->
-    case State#state.count =< State#state.sample_size of
-        true ->
-            %% NOTE: noproc errors are ignored by gen_event in the case where
-            %% the event_mgr has crashed. The proxy will eventually grab a new
-            %% event_mgr Pid wen it processes the 'DOWN' message.
+event_mgr() ->
+    Pid = appmeter_event_mgr_sup:get_event_mgr(),
+    monitor(process, Pid),
+    Pid.
+
+load_env(State) ->
+    FlushInterval = flush_interval(),
+    MaxSampleSize = max_sample_size(),
+    State#state{flush_interval=FlushInterval, max_sample_size=MaxSampleSize}.
+
+manage_timer(State) ->
+    timer:cancel(State#state.timer),
+    case timer:send_interval(State#state.flush_interval, flush) of
+        {ok, Timer} ->
+            {ok, State#state{timer=Timer}};
+        Error ->
+            Error
+    end.
+
+flush_interval() ->
+    case application:get_env(appmeter, flush_interval) of
+        {ok, V} ->
+            V;
+        _ ->
+            100
+    end.
+
+max_sample_size() ->
+    case application:get_env(appmeter, max_sample_size) of
+        {ok, V} ->
+            V;
+        _ ->
+            100
+    end.
+
+flush(State) ->
+    %% NOTE: noproc errors are ignored by gen_event in the case where
+    %% the event_mgr has crashed. The proxy will eventually grab a new
+    %% event_mgr Pid wen it processes the 'DOWN' message.
+    case State#state.acc of
+        [] ->
+            State#state{acc=[], sample_size=0, population_size=0};
+        Acc ->
+            EventMgr = State#state.event_mgr,
             SampleRate = State#state.sample_size / State#state.population_size,
-            appmeter_event_mgr:notify(State#state.event_mgr, {Events, SampleRate});
-        false ->
-            ok
+            appmeter_event_mgr:notify(EventMgr, {lists:append(Acc), SampleRate}),
+            State#state{acc=[], sample_size=0, population_size=0}
     end.
