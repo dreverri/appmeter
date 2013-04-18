@@ -27,7 +27,7 @@ reporter(Runners) ->
     end.
 
 report_event_mgrs() ->
-    EventMgrs = supervisor:which_children(appmeter_sup),
+    EventMgrs = supervisor:which_children(appmeter_event_mgr_sup),
     Qs = [message_queue_len(Pid) || {_, Pid, _, _} <- EventMgrs],
     summarize("event_mgr msg_qs (lower is better)", Qs).
 
