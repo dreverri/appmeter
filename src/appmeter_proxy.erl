@@ -49,29 +49,26 @@ reload(Pid) ->
 %% ------------------------------------------------------------------
 
 init(_) ->
+    random:seed(now()),
     EventMgr = event_mgr(),
     State = load_env(#state{event_mgr=EventMgr}),
-    case manage_timer(State) of
-        {ok, State1} ->
-            {ok, State1};
-        {error, Reason} ->
-            {stop, {timer_error, Reason}}
-    end.
+    {ok, State}.
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(reload, State) ->
     State1 = load_env(State),
-    case manage_timer(State1) of
-        {ok, State2} ->
-            {noreply, State2};
-        {error, Reason} ->
-            {stop, {timer_error, Reason}, State1}
-    end;
+    {noreply, State1};
 
 handle_cast({notify, Event}, State) ->
     PopulationSize = State#state.population_size + 1,
+    case PopulationSize of
+        1 ->
+            erlang:send_after(State#state.flush_interval, self(), flush);
+        _ ->
+            ok
+    end,
     case State#state.sample_size >= State#state.max_sample_size of
         true ->
             {noreply, State#state{population_size=PopulationSize}};
@@ -110,15 +107,6 @@ load_env(State) ->
     FlushInterval = flush_interval(),
     MaxSampleSize = max_sample_size(),
     State#state{flush_interval=FlushInterval, max_sample_size=MaxSampleSize}.
-
-manage_timer(State) ->
-    timer:cancel(State#state.timer),
-    case timer:send_interval(State#state.flush_interval, flush) of
-        {ok, Timer} ->
-            {ok, State#state{timer=Timer}};
-        Error ->
-            Error
-    end.
 
 flush_interval() ->
     case application:get_env(appmeter, flush_interval) of
