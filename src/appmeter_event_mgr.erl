@@ -1,7 +1,7 @@
 -module(appmeter_event_mgr).
 
 -export([start_link/0,
-         notify/2
+         sync_notify/2
         ]).
 
 %% ------------------------------------------------------------------
@@ -22,8 +22,8 @@ start_link() ->
             Error
     end.
 
-notify(Pid, Event) ->
-    gen_event:notify(Pid, Event).
+sync_notify(Pid, Event) ->
+    gen_event:sync_notify(Pid, Event).
 
 %% ------------------------------------------------------------------
 %% Internal Function Definitions

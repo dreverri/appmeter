@@ -1,10 +1,10 @@
 -module(appmeter).
 
 -export([proxy/0,
-        measure/2,
-        count/2,
-        gauge/2
-       ]).
+         measure/2,
+         count/2,
+         gauge/2
+        ]).
 
 proxy() ->
     appmeter_proxy_sup:start_proxy().

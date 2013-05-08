@@ -7,7 +7,8 @@
 
 -export([start_link/0,
          notify/2,
-         reload/1
+         reload/1,
+         drain/1
         ]).
 
 %% ------------------------------------------------------------------
@@ -22,15 +23,6 @@
          code_change/3
         ]).
 
--record(state, {event_mgr,
-                flush_interval,
-                max_sample_size,
-                timer,
-                sample_size=0,
-                population_size=0,
-                acc=[]
-               }).
-
 %% ------------------------------------------------------------------
 %% API Function Definitions
 %% ------------------------------------------------------------------
@@ -44,18 +36,38 @@ notify(Pid, Event) ->
 reload(Pid) ->
     gen_server:cast(Pid, reload).
 
+drain(Pid) ->
+    gen_server:call(Pid, drain, infinity).
+
 %% ------------------------------------------------------------------
 %% gen_server Function Definitions
 %% ------------------------------------------------------------------
 
-init(_) ->
-    random:seed(now()),
-    EventMgr = event_mgr(),
-    State = load_env(#state{event_mgr=EventMgr}),
-    {ok, State}.
+-record(state, {flusher,
+                max_sample_size,
+                sample_size=0,
+                population_size=0,
+                acc=[]
+               }).
 
-handle_call(_Request, _From, State) ->
-    {reply, ok, State}.
+init(_) ->
+    case appmeter_proxy_flusher:start_link(self()) of
+        {ok, Flusher} ->
+            State = load_env(#state{flusher=Flusher}),
+            {ok, State};
+        {error, Reason} ->
+            {stop, Reason}
+    end.
+
+handle_call(drain, _From, State) ->
+    case State#state.acc of
+        [] ->
+            {reply, empty, State};
+        Acc ->
+            SampleRate = State#state.sample_size / State#state.population_size,
+            State1 = State#state{acc=[], sample_size=0, population_size=0},
+            {reply, {ok, {lists:append(Acc), SampleRate}}, State1}
+    end.
 
 handle_cast(reload, State) ->
     State1 = load_env(State),
@@ -65,11 +77,11 @@ handle_cast({notify, Event}, State) ->
     PopulationSize = State#state.population_size + 1,
     case PopulationSize of
         1 ->
-            erlang:send_after(State#state.flush_interval, self(), flush);
+            appmeter_proxy_flusher:start_flush_timer(State#state.flusher);
         _ ->
             ok
     end,
-    case State#state.sample_size >= State#state.max_sample_size of
+    case State#state.sample_size > State#state.max_sample_size of
         true ->
             {noreply, State#state{population_size=PopulationSize}};
         false ->
@@ -80,13 +92,8 @@ handle_cast({notify, Event}, State) ->
                                   population_size=PopulationSize}}
     end.
 
-handle_info(flush, State) ->
-    State1 = flush(State),
-    {noreply, State1};
-
-handle_info({'DOWN', _, _, Pid, _}, State=#state{event_mgr=Pid}) ->
-    NewEventMgr = event_mgr(),
-    {noreply, State#state{event_mgr=NewEventMgr}}.
+handle_info(_Info, State) ->
+    {noreply, State}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -98,23 +105,9 @@ code_change(_OldVsn, State, _Extra) ->
 %% Internal Function Definitions
 %% ------------------------------------------------------------------
 
-event_mgr() ->
-    Pid = appmeter_event_mgr_sup:get_event_mgr(),
-    monitor(process, Pid),
-    Pid.
-
 load_env(State) ->
-    FlushInterval = flush_interval(),
     MaxSampleSize = max_sample_size(),
-    State#state{flush_interval=FlushInterval, max_sample_size=MaxSampleSize}.
-
-flush_interval() ->
-    case application:get_env(appmeter, flush_interval) of
-        {ok, V} ->
-            V;
-        _ ->
-            100
-    end.
+    State#state{max_sample_size=MaxSampleSize}.
 
 max_sample_size() ->
     case application:get_env(appmeter, max_sample_size) of
@@ -122,18 +115,4 @@ max_sample_size() ->
             V;
         _ ->
             100
-    end.
-
-flush(State) ->
-    %% NOTE: noproc errors are ignored by gen_event in the case where
-    %% the event_mgr has crashed. The proxy will eventually grab a new
-    %% event_mgr Pid wen it processes the 'DOWN' message.
-    case State#state.acc of
-        [] ->
-            State#state{acc=[], sample_size=0, population_size=0};
-        Acc ->
-            EventMgr = State#state.event_mgr,
-            SampleRate = State#state.sample_size / State#state.population_size,
-            appmeter_event_mgr:notify(EventMgr, {lists:append(Acc), SampleRate}),
-            State#state{acc=[], sample_size=0, population_size=0}
     end.
