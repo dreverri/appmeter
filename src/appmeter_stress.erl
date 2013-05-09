@@ -87,7 +87,7 @@ runner() ->
     runner(Pid, 0).
 
 runner(Pid, Count) ->
-    appmeter_proxy:notify(Pid, [{count, "foo", 1}]),
+    appmeter_proxy:send_one(Pid, {count, "foo", 1}),
     receive
         stop ->
             ok;

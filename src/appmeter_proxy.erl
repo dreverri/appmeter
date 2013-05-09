@@ -26,7 +26,8 @@
 %% ------------------------------------------------------------------
 
 -export([start_link/0,
-         notify/2,
+         send_one/2,
+         send_many/2,
          reload/1,
          drain/1
         ]).
@@ -50,8 +51,13 @@
 start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
-notify(Pid, Event) ->
-    gen_server:cast(Pid, {notify, Event}).
+send_one(Pid, Event) ->
+    send_many(Pid, [Event]).
+
+send_many(Pid, Events) ->
+    %% NOTE: It is possible to exceed max_sample_size by sending a lerge number
+    %% of events in a single call.
+    gen_server:cast(Pid, {notify, Events}).
 
 reload(Pid) ->
     gen_server:cast(Pid, reload).
@@ -93,10 +99,10 @@ handle_cast(reload, State) ->
     State1 = load_env(State),
     {noreply, State1};
 
-handle_cast({notify, Event}, State) ->
-    PopulationSize = State#state.population_size + 1,
-    case PopulationSize of
-        1 ->
+handle_cast({notify, Events}, State) ->
+    PopulationSize = State#state.population_size + length(Events),
+    case State#state.population_size of
+        0 ->
             appmeter_proxy_flusher:start_flush_timer(State#state.flusher);
         _ ->
             ok
@@ -105,8 +111,8 @@ handle_cast({notify, Event}, State) ->
         true ->
             {noreply, State#state{population_size=PopulationSize}};
         false ->
-            Acc = [Event|State#state.acc],
-            SampleSize = State#state.sample_size + 1,
+            Acc = [Events|State#state.acc],
+            SampleSize = State#state.sample_size + length(Events),
             {noreply, State#state{acc=Acc,
                                   sample_size=SampleSize,
                                   population_size=PopulationSize}}
