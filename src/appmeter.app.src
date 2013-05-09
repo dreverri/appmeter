@@ -10,7 +10,8 @@
   {mod, { appmeter_app, []}},
   {env, [
     {event_mgr_count, 8},
-    {handlers, []},
+    {handlers, [{appmeter_handler_statsd, []}]},
+
     %% NOTE: with a flush_interval of 1000 (ms) and a max_sample_size of 80
     %% each proxy process will pass at most 80 events per second to the event
     %% manager.

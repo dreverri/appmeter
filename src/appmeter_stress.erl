@@ -24,9 +24,7 @@
 
 start() ->
     application:load(appmeter),
-    application:set_env(appmeter, handlers, [{statsd, [
-                    {module, appmeter_handler_statsd},
-                    {args, []}]}]),
+    application:set_env(appmeter, handlers, [{appmeter_handler_stats, []}]),
     application:start(appmeter),
     Runners = [spawn(fun runner/0) || _ <- lists:seq(1, 200)],
     Reporter = spawn(fun() -> reporter(Runners) end),
