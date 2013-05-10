@@ -8,8 +8,8 @@ negatively impacting performance.
 
 application:start(appmeter).
 {ok, Pid} = appmeter:proxy().
-appmeter:send_one(Pid, {measure, <<"foo">>, 1}).
-appmeter:send_many(Pid, [{count, <<"bar">>, 3}, {gauge, <<"baz">>, 9}]).
+appmeter_proxy:send_one(Pid, {measure, <<"foo">>, 1}).
+appmeter_proxy:send_many(Pid, [{count, <<"bar">>, 3}, {gauge, <<"baz">>, 9}]).
 
 ```
 
