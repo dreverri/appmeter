@@ -59,7 +59,7 @@ appmeter_sup (one_for_one)
 
 Proxy processes are supervised by a simple_one_for_one supervisor, however, the
 processes are configured as transient which means they will not be restarted.
-Additionally, sending data to a proxy process uses a gen_server:cast/2 which
+Additionally, sending data to a proxy process uses a `gen_server:cast/2` which
 means that if the proxy process dies the send operation will fail silently. The
 proxy process should monitored and corrective action should be taken when
 necessary (e.g. start a new proxy process).
